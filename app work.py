@@ -34,6 +34,31 @@ CFG = {
 LAB = {"open": "Planned", "pending": "Pending", "placed": "Order placed", "future": "Future",
        "talk": "In talks", "new": "New", "incomplete": "Incomplete"}
 
+# SIP failure reasons for the Mutual funds tab: category -> [(reason, explanation)]
+MF_OTHERS = "Others"
+MF_REASONS = {
+    "Bank Account & Balance Related Issues": [
+        ("Insufficient Balance", "SIP debit date-la bank account-la thevaiyaana panam illai."),
+        ("Minimum Balance Hold / Lien", "Panam irundhum loan EMI, pending bank charges, lien hold-naala available balance kuraivu."),
+        ("Account Dormant / Freeze", "Account inactive (dormant) illa KYC update illaama freeze aagi debit nadakala."),
+    ],
+    "Bank Mandate (NACH / e-Mandate / Autopay) Issues": [
+        ("Mandate Limit Exceeded", "NACH / UPI Autopay max limit-a vida SIP amount adhigam."),
+        ("Mandate Expired or Not Activated", "Mandate validity mudinjiduchu illa bank side-la innum approve aagala."),
+        ("UPI Autopay Approval Pending", "Rs.15,000-ku mela pre-debit notification-ku manual approval thevai; approve pannala."),
+    ],
+    "Technical & Operational Reasons": [
+        ("Bank Server / NACH Clearing Delay", "Bank server down illa NPCI/NACH clearing-la technical glitch."),
+        ("Bank Account Closed / Changed", "Old account close panni AMC-la pudhu bank mandate update pannala."),
+        ("Holiday / Weekend Cut-off", "SIP date holiday/weekend; next working day balance illai."),
+    ],
+    "Compliance & Folio Issues": [
+        ("KYC Non-Compliance", "PAN-Aadhaar link illai illa KRA KYC On-Hold / Rejected."),
+        ("SIP Tenure Ended", "SIP start-la kuduthu end date mudinjiduchu, auto-stop aagiduchu."),
+    ],
+    MF_OTHERS: [],
+}
+
 
 # ---------- database ----------
 @st.cache_resource
@@ -238,9 +263,78 @@ def render_item(it, tab):
         st.button("Remove item", key=f"rm_{i}", on_click=on_remove, args=(i,))
 
 
+def _mf_reset():
+    for k, v in {"mf_client": "", "mf_fund": "", "mf_cat": "(select)", "mf_reason": "(select)",
+                 "mf_other": "", "mf_status": "new", "mf_added": date.today(), "mf_due": None}.items():
+        st.session_state[k] = v
+
+
+def on_mf_add():
+    ss = st.session_state
+    fund = ss.get("mf_fund", "").strip()
+    cat, reason = ss.get("mf_cat"), ss.get("mf_reason")
+    if not fund:
+        ss["mf_err"] = "Fund name type pannunga."
+        return
+    if cat in (None, "(select)"):
+        ss["mf_err"] = "Reason category select pannunga."
+        return
+    if cat == MF_OTHERS:
+        detail = ss.get("mf_other", "").strip()
+        if not detail:
+            ss["mf_err"] = "Others-na issue enna nu type pannunga."
+            return
+        title = f"{fund} · Others: {detail}"
+    else:
+        if reason in (None, "(select)"):
+            ss["mf_err"] = "Specific reason select pannunga."
+            return
+        title = f"{fund} · {cat} → {reason}"
+    add_item("mf", ss.get("mf_client", "").strip(), title, None, ss["mf_status"], ss["mf_added"], ss.get("mf_due"))
+    ss.pop("mf_err", None)
+    _mf_reset()
+
+
+def mf_add_form():
+    """Add box for Mutual funds. Not an st.form, so the reason list can change with the category."""
+    ss = st.session_state
+    if "mf_cat" not in ss:
+        _mf_reset()
+    with st.container(border=True):
+        a, b = st.columns(2)
+        a.text_input("Client", key="mf_client")
+        b.text_input("Fund name", key="mf_fund", placeholder="e.g. HDFC Flexi Cap Fund")
+        c1, c2 = st.columns(2)
+        c1.selectbox("Reason category", ["(select)"] + list(MF_REASONS), key="mf_cat")
+        cat = ss["mf_cat"]
+        if cat == MF_OTHERS:
+            c2.text_input("Issue (type here)", key="mf_other", placeholder="Type the issue")
+        elif cat != "(select)":
+            reasons = MF_REASONS[cat]
+            names = [r for r, _ in reasons]
+            if ss.get("mf_reason") not in names:
+                ss["mf_reason"] = "(select)"
+            c2.selectbox("Specific reason", ["(select)"] + names, key="mf_reason")
+            exp = dict(reasons).get(ss["mf_reason"])
+            if exp:
+                c2.caption(exp)
+        else:
+            c2.selectbox("Specific reason", ["(select category first)"], key="mf_reason_dummy", disabled=True)
+        d = st.columns(4)
+        d[0].selectbox("Status", CFG["mf"]["statuses"], format_func=LAB.get, key="mf_status")
+        d[1].date_input("Added date", key="mf_added")
+        d[2].date_input("Due date (optional)", key="mf_due")
+        st.button("Add", type="primary", key="mf_add_btn", on_click=on_mf_add)
+        if ss.get("mf_err"):
+            st.error(ss["mf_err"])
+
+
 def tab_view(tab, search):
     cfg = CFG[tab]
-    with st.form(f"add_{tab}", clear_on_submit=True):
+    if tab == "mf":
+        mf_add_form()
+    else:
+      with st.form(f"add_{tab}", clear_on_submit=True):
         a, b = st.columns([1, 3])
         grp = a.text_input(cfg["tag"])
         title = b.text_input("Task / plan", placeholder=cfg["ph"])
