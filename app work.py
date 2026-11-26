@@ -229,7 +229,7 @@ def render_item(it, tab):
     i = it["id"]
     done = bool(it["done_at"])
     late = (not done) and it["due"] and date.fromisoformat(it["due"]) < date.today()
-    c1, c2, c3 = st.columns([0.06, 0.70, 0.24], vertical_alignment="center")
+    c1, c2, c3, c4 = st.columns([0.06, 0.64, 0.21, 0.09], vertical_alignment="center")
     c1.checkbox("Done", value=done, key=f"done_{i}", label_visibility="collapsed",
                 on_change=on_done, args=(i, f"done_{i}"))
     label = (f"**{it['grp']}** · " if it["grp"] else "") + it["title"]
@@ -241,11 +241,7 @@ def render_item(it, tab):
         meta += (" · " if meta else "") + ("🔴 Overdue, due " if late else "Due ") + fmt_d(it["due"])
     c2.caption(meta)
     notes = q("SELECT * FROM notes WHERE item_id=? ORDER BY id", (i,))
-    recent = False
-    if notes:
-        last = notes[-1]
-        recent = (datetime.now() - datetime.fromisoformat(last["ts"])).total_seconds() < 86400
-        c2.markdown(("🆕 " if recent else "📝 ") + f"_{fmt_dt(last['ts'])}_ — {last['text']}")
+    recent = bool(notes) and (datetime.now() - datetime.fromisoformat(notes[-1]["ts"])).total_seconds() < 86400
     if done:
         c3.success("Done")
     else:
@@ -253,10 +249,11 @@ def render_item(it, tab):
         c3.selectbox("Status", sts, index=sts.index(it["status"]) if it["status"] in sts else 0,
                      format_func=LAB.get, key=f"st_{i}", label_visibility="collapsed",
                      on_change=on_status, args=(i, f"st_{i}"))
-    label = "➕ Dates, notes and remove"
-    if notes:
-        label += f"  ·  {len(notes)} note" + ("s" if len(notes) > 1 else "") + ("  ·  🆕 new" if recent else "")
-    with st.expander(label):
+    okey = f"open_{i}"
+    is_open = st.session_state.get(okey, False)
+    c4.button("➖" if is_open else ("➕🆕" if recent else "➕"), key=f"tg_{i}",
+              help="Dates, notes, remove", on_click=lambda k=okey: st.session_state.update({k: not st.session_state.get(k, False)}))
+    if is_open:
         d1, d2 = st.columns(2)
         d1.date_input("Added date", value=date.fromisoformat(it["added"]) if it["added"] else None,
                       key=f"ad_{i}", on_change=on_date, args=(i, "added", f"ad_{i}"))
