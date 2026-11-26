@@ -265,7 +265,7 @@ def render_item(it, tab):
 
 def _mf_reset():
     for k, v in {"mf_client": "", "mf_fund": "", "mf_cat": "(select)", "mf_reason": "(select)",
-                 "mf_other": "", "mf_status": "new", "mf_added": date.today(), "mf_due": None}.items():
+                 "mf_other": "", "mf_amount": 0.0, "mf_status": "new", "mf_added": date.today(), "mf_due": None}.items():
         st.session_state[k] = v
 
 
@@ -273,9 +273,14 @@ def on_mf_add():
     ss = st.session_state
     fund = ss.get("mf_fund", "").strip()
     cat, reason = ss.get("mf_cat"), ss.get("mf_reason")
+    amount = ss.get("mf_amount") or 0
     if not fund:
         ss["mf_err"] = "Fund name type pannunga."
         return
+    if amount <= 0:
+        ss["mf_err"] = "Amount type pannunga."
+        return
+    amt = f"₹{amount:,.0f}" if float(amount).is_integer() else f"₹{amount:,.2f}"
     if cat in (None, "(select)"):
         ss["mf_err"] = "Reason category select pannunga."
         return
@@ -284,12 +289,12 @@ def on_mf_add():
         if not detail:
             ss["mf_err"] = "Others-na issue enna nu type pannunga."
             return
-        title = f"{fund} · Others: {detail}"
+        title = f"{fund} · {amt} · Others: {detail}"
     else:
         if reason in (None, "(select)"):
             ss["mf_err"] = "Specific reason select pannunga."
             return
-        title = f"{fund} · {cat} → {reason}"
+        title = f"{fund} · {amt} · {cat} → {reason}"
     add_item("mf", ss.get("mf_client", "").strip(), title, None, ss["mf_status"], ss["mf_added"], ss.get("mf_due"))
     ss.pop("mf_err", None)
     _mf_reset()
@@ -332,8 +337,9 @@ def mf_add_form():
             c2.selectbox("Specific reason", ["(select category first)"], key="mf_reason_dummy", disabled=True)
         d = st.columns(4)
         d[0].selectbox("Status", CFG["mf"]["statuses"], format_func=LAB.get, key="mf_status")
-        d[1].date_input("Added date", key="mf_added")
-        d[2].date_input("Due date (optional)", key="mf_due")
+        d[1].number_input("Amount (₹)", min_value=0.0, step=500.0, format="%g", key="mf_amount")
+        d[2].date_input("Added date", key="mf_added")
+        d[3].date_input("Due date (optional)", key="mf_due")
         st.button("Add", type="primary", key="mf_add_btn", on_click=on_mf_add)
         if ss.get("mf_err"):
             st.error(ss["mf_err"])
