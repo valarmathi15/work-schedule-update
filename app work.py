@@ -253,11 +253,7 @@ def render_item(it, tab):
     c2.caption(meta)
     notes = q("SELECT * FROM notes WHERE item_id=? ORDER BY id", (i,))
     m_open = st.session_state.get(f"mopen_{i}", False)
-    seen = it["seen_notes"] or 0
-    if m_open and seen < len(notes):
-        x("UPDATE items SET seen_notes=? WHERE id=?", (len(notes), i))
-        seen = len(notes)
-    unread = 0 if m_open else max(len(notes) - seen, 0)
+    unread = max(len(notes) - (it["seen_notes"] or 0), 0)
     if done:
         c3.success("Done")
     else:
