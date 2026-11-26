@@ -293,11 +293,21 @@ def on_mf_add():
     add_item("mf", ss.get("mf_client", "").strip(), title, None, ss["mf_status"], ss["mf_added"], ss.get("mf_due"))
     ss.pop("mf_err", None)
     _mf_reset()
+    ss["mf_show"] = False
 
 
 def mf_add_form():
     """Add box for Mutual funds. Not an st.form, so the reason list can change with the category."""
     ss = st.session_state
+    ss.setdefault("mf_show", False)
+
+    def toggle():
+        ss["mf_show"] = not ss["mf_show"]
+        ss.pop("mf_err", None)
+
+    st.button("✖ Close" if ss["mf_show"] else "➕ Add item", key="mf_toggle", on_click=toggle)
+    if not ss["mf_show"]:
+        return
     if "mf_cat" not in ss:
         _mf_reset()
     with st.container(border=True):
