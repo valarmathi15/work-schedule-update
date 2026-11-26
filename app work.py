@@ -240,6 +240,12 @@ def render_item(it, tab):
     if it["due"] and not done:
         meta += (" · " if meta else "") + ("🔴 Overdue, due " if late else "Due ") + fmt_d(it["due"])
     c2.caption(meta)
+    notes = q("SELECT * FROM notes WHERE item_id=? ORDER BY id", (i,))
+    recent = False
+    if notes:
+        last = notes[-1]
+        recent = (datetime.now() - datetime.fromisoformat(last["ts"])).total_seconds() < 86400
+        c2.markdown(("🆕 " if recent else "📝 ") + f"_{fmt_dt(last['ts'])}_ — {last['text']}")
     if done:
         c3.success("Done")
     else:
@@ -247,7 +253,10 @@ def render_item(it, tab):
         c3.selectbox("Status", sts, index=sts.index(it["status"]) if it["status"] in sts else 0,
                      format_func=LAB.get, key=f"st_{i}", label_visibility="collapsed",
                      on_change=on_status, args=(i, f"st_{i}"))
-    with st.expander("Dates, notes and remove"):
+    label = "➕ Dates, notes and remove"
+    if notes:
+        label += f"  ·  {len(notes)} note" + ("s" if len(notes) > 1 else "") + ("  ·  🆕 new" if recent else "")
+    with st.expander(label):
         d1, d2 = st.columns(2)
         d1.date_input("Added date", value=date.fromisoformat(it["added"]) if it["added"] else None,
                       key=f"ad_{i}", on_change=on_date, args=(i, "added", f"ad_{i}"))
@@ -257,7 +266,7 @@ def render_item(it, tab):
         if len(names) > 1:
             st.selectbox("Assigned to", names, index=names.index(it["owner"]) if it["owner"] in names else 0,
                          key=f"ow_{i}", on_change=on_owner, args=(i, f"ow_{i}"))
-        for n in q("SELECT * FROM notes WHERE item_id=? ORDER BY id", (i,)):
+        for n in notes:
             st.markdown(f"- _{fmt_dt(n['ts'])}_ — {n['text']}")
         st.text_input("Add note: what did you do?", key=f"nt_{i}", on_change=on_note, args=(i, f"nt_{i}"))
         st.button("Remove item", key=f"rm_{i}", on_click=on_remove, args=(i,))
