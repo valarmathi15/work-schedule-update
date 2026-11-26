@@ -271,8 +271,12 @@ def render_item(it, tab):
         if len(names) > 1:
             st.selectbox("Assigned to", names, index=names.index(it["owner"]) if it["owner"] in names else 0,
                          key=f"ow_{i}", on_change=on_owner, args=(i, f"ow_{i}"))
-        for n in reversed(notes):
-            st.markdown(f"- _{fmt_dt(n['ts'])}_ — {n['text']}")
+        if notes:
+            st.markdown(f"{'🆕 ' if recent else '📝 '}_{fmt_dt(notes[-1]['ts'])}_ — {notes[-1]['text']}")
+            if len(notes) > 1:
+                with st.expander(f"Older notes ({len(notes) - 1})"):
+                    for n in reversed(notes[:-1]):
+                        st.markdown(f"- _{fmt_dt(n['ts'])}_ — {n['text']}")
         st.text_input("Add note: what did you do?", key=f"nt_{i}", on_change=on_note, args=(i, f"nt_{i}"))
 
 
