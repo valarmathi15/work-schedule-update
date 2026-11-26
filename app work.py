@@ -229,7 +229,7 @@ def render_item(it, tab):
     i = it["id"]
     done = bool(it["done_at"])
     late = (not done) and it["due"] and date.fromisoformat(it["due"]) < date.today()
-    c1, c2, c3, c4 = st.columns([0.06, 0.64, 0.21, 0.09], vertical_alignment="center")
+    c1, c2, c3, c4, c5 = st.columns([0.06, 0.57, 0.20, 0.085, 0.085], vertical_alignment="center")
     c1.checkbox("Done", value=done, key=f"done_{i}", label_visibility="collapsed",
                 on_change=on_done, args=(i, f"done_{i}"))
     label = (f"**{it['grp']}** · " if it["grp"] else "") + it["title"]
@@ -251,8 +251,16 @@ def render_item(it, tab):
                      on_change=on_status, args=(i, f"st_{i}"))
     okey = f"open_{i}"
     is_open = st.session_state.get(okey, False)
-    c4.button("➖" if is_open else ("➕🆕" if recent else "➕"), key=f"tg_{i}",
+    c4.button("🔼" if is_open else ("➕🆕" if recent else "➕"), key=f"tg_{i}",
               help="Dates, notes, remove", on_click=lambda k=okey: st.session_state.update({k: not st.session_state.get(k, False)}))
+    ckey = f"cf_{i}"
+    c5.button("➖", key=f"rmq_{i}", help="Delete this task",
+              on_click=lambda k=ckey: st.session_state.update({k: True}))
+    if st.session_state.get(ckey):
+        w1, w2, w3 = st.columns([0.6, 0.2, 0.2], vertical_alignment="center")
+        w1.warning("Indha task-a delete pannanuma?")
+        w2.button("Yes, delete", key=f"rmy_{i}", type="primary", on_click=on_remove, args=(i,))
+        w3.button("Cancel", key=f"rmn_{i}", on_click=lambda k=ckey: st.session_state.update({k: False}))
     if is_open:
         d1, d2 = st.columns(2)
         d1.date_input("Added date", value=date.fromisoformat(it["added"]) if it["added"] else None,
@@ -263,10 +271,9 @@ def render_item(it, tab):
         if len(names) > 1:
             st.selectbox("Assigned to", names, index=names.index(it["owner"]) if it["owner"] in names else 0,
                          key=f"ow_{i}", on_change=on_owner, args=(i, f"ow_{i}"))
-        for n in notes:
+        for n in reversed(notes):
             st.markdown(f"- _{fmt_dt(n['ts'])}_ — {n['text']}")
         st.text_input("Add note: what did you do?", key=f"nt_{i}", on_change=on_note, args=(i, f"nt_{i}"))
-        st.button("Remove item", key=f"rm_{i}", on_click=on_remove, args=(i,))
 
 
 def _mf_reset():
