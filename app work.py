@@ -61,8 +61,98 @@ MF_REASONS = {
 
 
 # ---------- database ----------
+# If DATABASE_URL is set (Streamlit secrets or environment) the app stores everything in that
+# Postgres database (e.g. Supabase), so data survives restarts and redeploys.
+# Without it, it falls back to the local SQLite file (data is lost when Streamlit Cloud resets).
+def _db_url():
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        try:
+            url = st.secrets.get("DATABASE_URL")
+        except Exception:
+            url = None
+    return url or None
+
+
+DB_URL = _db_url()
+
+PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS items(
+    id SERIAL PRIMARY KEY, tab TEXT, grp TEXT, title TEXT, kind TEXT, status TEXT, added TEXT,
+    due TEXT, done_at TEXT, created_at TEXT, owner TEXT, seen_notes INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS notes(id SERIAL PRIMARY KEY, item_id INTEGER, ts TEXT, text TEXT);
+CREATE TABLE IF NOT EXISTS daily(id SERIAL PRIMARY KEY, title TEXT, owner TEXT);
+CREATE TABLE IF NOT EXISTS daily_log(day TEXT, daily_id INTEGER, PRIMARY KEY(day, daily_id));
+CREATE TABLE IF NOT EXISTS log(
+    id SERIAL PRIMARY KEY, ts TEXT, item_id INTEGER, tab TEXT, title TEXT, action TEXT, detail TEXT, owner TEXT);
+CREATE TABLE IF NOT EXISTS employees(name TEXT PRIMARY KEY);
+"""
+
+
+class PGConn:
+    """Small wrapper so the rest of the app can keep using sqlite-style SQL (? placeholders)."""
+
+    def __init__(self, url):
+        self.url = url
+        self.c = None
+        self._connect()
+        cur = self.c.cursor()
+        cur.execute(PG_SCHEMA)
+        cur.close()
+
+    def _connect(self):
+        import psycopg2
+        import psycopg2.extras
+        self.c = psycopg2.connect(self.url, connect_timeout=15, cursor_factory=psycopg2.extras.RealDictCursor)
+        self.c.autocommit = True
+
+    def execute(self, sql, args=()):
+        import psycopg2
+        sql = sql.replace("%", "%%").replace("?", "%s")
+        head = sql.lstrip().upper()
+        if head.startswith("INSERT OR IGNORE"):
+            sql = sql.replace("INSERT OR IGNORE", "INSERT", 1) + " ON CONFLICT DO NOTHING"
+        elif head.startswith("INSERT INTO ITEMS") or head.startswith("INSERT INTO NOTES") \
+                or head.startswith("INSERT INTO DAILY(") or head.startswith("INSERT INTO LOG"):
+            sql += " RETURNING id"
+        for attempt in (1, 2):
+            try:
+                cur = self.c.cursor()
+                cur.execute(sql, tuple(args))
+                break
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                if attempt == 2:
+                    raise
+                self._connect()
+        res = _PGResult(cur)
+        return res
+
+    def commit(self):
+        pass
+
+
+class _PGResult:
+    def __init__(self, cur):
+        self.cur = cur
+        self.lastrowid = None
+        if cur.description is not None:
+            self._rows = cur.fetchall()
+            if "RETURNING" in (cur.query or b"").decode(errors="ignore").upper() and self._rows:
+                self.lastrowid = self._rows[0].get("id")
+        else:
+            self._rows = []
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
 @st.cache_resource
 def conn():
+    if DB_URL:
+        return PGConn(DB_URL)
     c = sqlite3.connect(DB_PATH, check_same_thread=False)
     c.row_factory = sqlite3.Row
     c.executescript(
@@ -505,7 +595,7 @@ def overview():
         st.text_input("Add a daily routine item", key="daily_new", on_change=on_daily_add, args=("daily_new",))
 
     st.subheader("Project progress")
-    prog = q("""SELECT grp, COUNT(*) total, SUM(done_at IS NOT NULL) done FROM items
+    prog = q("""SELECT grp, COUNT(*) total, SUM(CASE WHEN done_at IS NOT NULL THEN 1 ELSE 0 END) done FROM items
                 WHERE tab='work' AND kind='Project' AND owner=? GROUP BY grp""", (emp(),))
     if prog:
         for p in prog:
