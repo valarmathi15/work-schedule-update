@@ -508,10 +508,88 @@ def mf_add_form():
             st.error(ss["mf_err"])
 
 
+MULTI_TABS = ("follow",)
+
+
+def _mt_reset(tab):
+    ss = st.session_state
+    for k in list(ss.keys()):
+        if k.startswith(f"{tab}_task_"):
+            del ss[k]
+    ss[f"{tab}_rows"] = 1
+    ss[f"{tab}_client"] = ""
+    ss[f"{tab}_status"] = "new"
+    ss[f"{tab}_added"] = date.today()
+    ss[f"{tab}_due"] = None
+
+
+def on_mt_more(tab):
+    st.session_state[f"{tab}_rows"] = st.session_state.get(f"{tab}_rows", 1) + 1
+
+
+def on_mt_less(tab):
+    ss = st.session_state
+    n = ss.get(f"{tab}_rows", 1)
+    if n > 1:
+        ss.pop(f"{tab}_task_{n - 1}", None)
+        ss[f"{tab}_rows"] = n - 1
+
+
+def on_mt_add(tab):
+    ss = st.session_state
+    tasks = [ss.get(f"{tab}_task_{n}", "").strip() for n in range(ss.get(f"{tab}_rows", 1))]
+    tasks = [t for t in tasks if t]
+    if not tasks:
+        ss[f"{tab}_err"] = "Oru task / plan-aavadhu type pannunga."
+        return
+    client = ss.get(f"{tab}_client", "").strip()
+    for t in tasks:
+        add_item(tab, client, t, None, ss[f"{tab}_status"], ss[f"{tab}_added"], ss.get(f"{tab}_due"))
+    ss.pop(f"{tab}_err", None)
+    _mt_reset(tab)
+    ss[f"{tab}_show"] = False
+    st.toast(f"{len(tasks)} task{'s' if len(tasks) > 1 else ''} added")
+
+
+def multi_add_form(tab):
+    """Add box with one client and many tasks. A Streamlit widget form can't grow rows, so plain widgets are used."""
+    ss = st.session_state
+    cfg = CFG[tab]
+    ss.setdefault(f"{tab}_show", False)
+
+    def toggle():
+        ss[f"{tab}_show"] = not ss[f"{tab}_show"]
+        ss.pop(f"{tab}_err", None)
+
+    st.button("✖ Close" if ss[f"{tab}_show"] else "➕ Add item", key=f"{tab}_toggle", on_click=toggle)
+    if not ss[f"{tab}_show"]:
+        return
+    if f"{tab}_rows" not in ss:
+        _mt_reset(tab)
+    with st.container(border=True):
+        st.text_input(cfg["tag"], key=f"{tab}_client")
+        rows = ss[f"{tab}_rows"]
+        for n in range(rows):
+            st.text_input(f"Task / plan {n + 1}" if rows > 1 else "Task / plan", key=f"{tab}_task_{n}", placeholder=cfg["ph"])
+        m1, m2, _ = st.columns([1.3, 1.5, 4])
+        m1.button("➕ Add another task", key=f"{tab}_more", on_click=on_mt_more, args=(tab,))
+        if rows > 1:
+            m2.button("➖ Remove last task", key=f"{tab}_less", on_click=on_mt_less, args=(tab,))
+        d = st.columns(3)
+        d[0].selectbox("Status", cfg["statuses"], format_func=LAB.get, key=f"{tab}_status")
+        d[1].date_input("Added date", key=f"{tab}_added")
+        d[2].date_input("Due date (optional)", key=f"{tab}_due")
+        st.button("Add", type="primary", key=f"{tab}_add_btn", on_click=on_mt_add, args=(tab,))
+        if ss.get(f"{tab}_err"):
+            st.error(ss[f"{tab}_err"])
+
+
 def tab_view(tab, search):
     cfg = CFG[tab]
     if tab == "mf":
         mf_add_form()
+    elif tab in MULTI_TABS:
+        multi_add_form(tab)
     else:
       with st.form(f"add_{tab}", clear_on_submit=True):
         a, b = st.columns([1, 3])
