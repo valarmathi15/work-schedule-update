@@ -83,6 +83,9 @@ def conn():
     for t in ("items", "daily", "log"):
         if "owner" not in [r[1] for r in c.execute(f"PRAGMA table_info({t})")]:
             c.execute(f"ALTER TABLE {t} ADD COLUMN owner TEXT")
+    if "seen_notes" not in [r[1] for r in c.execute("PRAGMA table_info(items)")]:
+        c.execute("ALTER TABLE items ADD COLUMN seen_notes INTEGER DEFAULT 0")
+        c.execute("UPDATE items SET seen_notes=(SELECT COUNT(*) FROM notes WHERE notes.item_id=items.id)")
     if c.execute("SELECT 1 FROM items WHERE owner IS NULL UNION SELECT 1 FROM daily WHERE owner IS NULL").fetchone():
         for t in ("items", "daily", "log"):
             c.execute(f"UPDATE {t} SET owner='Me' WHERE owner IS NULL")
@@ -225,11 +228,19 @@ def on_daily_remove(i, title):
 
 
 # ---------- UI pieces ----------
+def on_msg_toggle(i):
+    ss = st.session_state
+    k = f"mopen_{i}"
+    ss[k] = not ss.get(k, False)
+    if ss[k]:
+        x("UPDATE items SET seen_notes=(SELECT COUNT(*) FROM notes WHERE item_id=?) WHERE id=?", (i, i))
+
+
 def render_item(it, tab):
     i = it["id"]
     done = bool(it["done_at"])
     late = (not done) and it["due"] and date.fromisoformat(it["due"]) < date.today()
-    c1, c2, c3, c4, c5 = st.columns([0.06, 0.57, 0.20, 0.085, 0.085], vertical_alignment="center")
+    c1, c2, c3, c4, c5, c6 = st.columns([0.05, 0.50, 0.17, 0.10, 0.09, 0.09], vertical_alignment="center")
     c1.checkbox("Done", value=done, key=f"done_{i}", label_visibility="collapsed",
                 on_change=on_done, args=(i, f"done_{i}"))
     label = (f"**{it['grp']}** · " if it["grp"] else "") + it["title"]
@@ -241,7 +252,12 @@ def render_item(it, tab):
         meta += (" · " if meta else "") + ("🔴 Overdue, due " if late else "Due ") + fmt_d(it["due"])
     c2.caption(meta)
     notes = q("SELECT * FROM notes WHERE item_id=? ORDER BY id", (i,))
-    recent = bool(notes) and (datetime.now() - datetime.fromisoformat(notes[-1]["ts"])).total_seconds() < 86400
+    m_open = st.session_state.get(f"mopen_{i}", False)
+    seen = it["seen_notes"] or 0
+    if m_open and seen < len(notes):
+        x("UPDATE items SET seen_notes=? WHERE id=?", (len(notes), i))
+        seen = len(notes)
+    unread = 0 if m_open else max(len(notes) - seen, 0)
     if done:
         c3.success("Done")
     else:
@@ -249,12 +265,14 @@ def render_item(it, tab):
         c3.selectbox("Status", sts, index=sts.index(it["status"]) if it["status"] in sts else 0,
                      format_func=LAB.get, key=f"st_{i}", label_visibility="collapsed",
                      on_change=on_status, args=(i, f"st_{i}"))
+    c4.button("💬" + (f" :green[**{unread}**]" if unread else ""), key=f"mg_{i}",
+              help="Notes", on_click=on_msg_toggle, args=(i,))
     okey = f"open_{i}"
     is_open = st.session_state.get(okey, False)
-    c4.button("🔼" if is_open else ("➕🆕" if recent else "➕"), key=f"tg_{i}",
-              help="Dates, notes, remove", on_click=lambda k=okey: st.session_state.update({k: not st.session_state.get(k, False)}))
+    c5.button("🔼" if is_open else "➕", key=f"tg_{i}",
+              help="Dates and assignee", on_click=lambda k=okey: st.session_state.update({k: not st.session_state.get(k, False)}))
     ckey = f"cf_{i}"
-    c5.button("➖", key=f"rmq_{i}", help="Delete this task",
+    c6.button("➖", key=f"rmq_{i}", help="Delete this task",
               on_click=lambda k=ckey: st.session_state.update({k: True}))
     if st.session_state.get(ckey):
         w1, w2, w3 = st.columns([0.6, 0.2, 0.2], vertical_alignment="center")
@@ -271,12 +289,15 @@ def render_item(it, tab):
         if len(names) > 1:
             st.selectbox("Assigned to", names, index=names.index(it["owner"]) if it["owner"] in names else 0,
                          key=f"ow_{i}", on_change=on_owner, args=(i, f"ow_{i}"))
+    if m_open:
         if notes:
-            st.markdown(f"{'🆕 ' if recent else '📝 '}_{fmt_dt(notes[-1]['ts'])}_ — {notes[-1]['text']}")
+            st.markdown(f"📝 _{fmt_dt(notes[-1]['ts'])}_ — {notes[-1]['text']}")
             if len(notes) > 1:
                 with st.expander(f"Older notes ({len(notes) - 1})"):
                     for n in reversed(notes[:-1]):
                         st.markdown(f"- _{fmt_dt(n['ts'])}_ — {n['text']}")
+        else:
+            st.caption("No notes yet.")
         st.text_input("Add note: what did you do?", key=f"nt_{i}", on_change=on_note, args=(i, f"nt_{i}"))
 
 
