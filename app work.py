@@ -297,46 +297,76 @@ def render_item(it, tab):
         st.text_input("Add note: what did you do?", key=f"nt_{i}", on_change=on_note, args=(i, f"nt_{i}"))
 
 
+MF_ROW_KEYS = ("mf_fund_", "mf_cat_", "mf_reason_", "mf_other_", "mf_amount_")
+
+
 def _mf_reset():
-    for k, v in {"mf_client": "", "mf_fund": "", "mf_cat": "(select)", "mf_reason": "(select)",
-                 "mf_other": "", "mf_amount": 0.0, "mf_status": "new", "mf_added": date.today(), "mf_due": None}.items():
-        st.session_state[k] = v
+    ss = st.session_state
+    for k in list(ss.keys()):
+        if k.startswith(MF_ROW_KEYS):
+            del ss[k]
+    ss["mf_rows"] = 1
+    ss["mf_client"] = ""
+    ss["mf_status"] = "new"
+    ss["mf_added"] = date.today()
+    ss["mf_due"] = None
+
+
+def on_mf_more():
+    st.session_state["mf_rows"] = st.session_state.get("mf_rows", 1) + 1
+
+
+def on_mf_less():
+    ss = st.session_state
+    n = ss.get("mf_rows", 1)
+    if n > 1:
+        for k in list(ss.keys()):
+            if k.startswith(MF_ROW_KEYS) and k.endswith(f"_{n - 1}"):
+                del ss[k]
+        ss["mf_rows"] = n - 1
 
 
 def on_mf_add():
     ss = st.session_state
-    fund = ss.get("mf_fund", "").strip()
-    cat, reason = ss.get("mf_cat"), ss.get("mf_reason")
-    amount = ss.get("mf_amount") or 0
-    if not fund:
-        ss["mf_err"] = "Fund name type pannunga."
-        return
-    if amount <= 0:
-        ss["mf_err"] = "Amount type pannunga."
-        return
-    amt = f"₹{amount:,.0f}" if float(amount).is_integer() else f"₹{amount:,.2f}"
-    if cat in (None, "(select)"):
-        ss["mf_err"] = "Reason category select pannunga."
-        return
-    if cat == MF_OTHERS:
-        detail = ss.get("mf_other", "").strip()
-        if not detail:
-            ss["mf_err"] = "Others-na issue enna nu type pannunga."
+    titles = []
+    for n in range(ss.get("mf_rows", 1)):
+        fund = ss.get(f"mf_fund_{n}", "").strip()
+        cat = ss.get(f"mf_cat_{n}", "(select)")
+        reason = ss.get(f"mf_reason_{n}", "(select)")
+        amount = ss.get(f"mf_amount_{n}") or 0
+        tag = f"Fund {n + 1}: "
+        if not fund:
+            ss["mf_err"] = tag + "Fund name type pannunga."
             return
-        title = f"{fund} · {amt} · Others: {detail}"
-    else:
-        if reason in (None, "(select)"):
-            ss["mf_err"] = "Specific reason select pannunga."
+        if amount <= 0:
+            ss["mf_err"] = tag + "Amount type pannunga."
             return
-        title = f"{fund} · {amt} · {cat} → {reason}"
-    add_item("mf", ss.get("mf_client", "").strip(), title, None, ss["mf_status"], ss["mf_added"], ss.get("mf_due"))
+        if cat == "(select)":
+            ss["mf_err"] = tag + "Reason category select pannunga."
+            return
+        amt = f"₹{amount:,.0f}" if float(amount).is_integer() else f"₹{amount:,.2f}"
+        if cat == MF_OTHERS:
+            detail = ss.get(f"mf_other_{n}", "").strip()
+            if not detail:
+                ss["mf_err"] = tag + "Others-na issue enna nu type pannunga."
+                return
+            titles.append(f"{fund} · {amt} · Others: {detail}")
+        else:
+            if reason == "(select)":
+                ss["mf_err"] = tag + "Specific reason select pannunga."
+                return
+            titles.append(f"{fund} · {amt} · {cat} → {reason}")
+    client = ss.get("mf_client", "").strip()
+    for t in titles:
+        add_item("mf", client, t, None, ss["mf_status"], ss["mf_added"], ss.get("mf_due"))
     ss.pop("mf_err", None)
     _mf_reset()
     ss["mf_show"] = False
+    st.toast(f"{len(titles)} fund item{'s' if len(titles) > 1 else ''} added")
 
 
 def mf_add_form():
-    """Add box for Mutual funds. Not an st.form, so the reason list can change with the category."""
+    """Add box for Mutual funds: one client, one or more funds. No st.form, so the reason list follows the category."""
     ss = st.session_state
     ss.setdefault("mf_show", False)
 
@@ -347,33 +377,42 @@ def mf_add_form():
     st.button("✖ Close" if ss["mf_show"] else "➕ Add item", key="mf_toggle", on_click=toggle)
     if not ss["mf_show"]:
         return
-    if "mf_cat" not in ss:
+    if "mf_rows" not in ss:
         _mf_reset()
     with st.container(border=True):
-        a, b = st.columns(2)
-        a.text_input("Client", key="mf_client")
-        b.text_input("Fund name", key="mf_fund", placeholder="e.g. HDFC Flexi Cap Fund")
-        c1, c2 = st.columns(2)
-        c1.selectbox("Reason category", ["(select)"] + list(MF_REASONS), key="mf_cat")
-        cat = ss["mf_cat"]
-        if cat == MF_OTHERS:
-            c2.text_input("Issue (type here)", key="mf_other", placeholder="Type the issue")
-        elif cat != "(select)":
-            reasons = MF_REASONS[cat]
-            names = [r for r, _ in reasons]
-            if ss.get("mf_reason") not in names:
-                ss["mf_reason"] = "(select)"
-            c2.selectbox("Specific reason", ["(select)"] + names, key="mf_reason")
-            exp = dict(reasons).get(ss["mf_reason"])
-            if exp:
-                c2.caption(exp)
-        else:
-            c2.selectbox("Specific reason", ["(select category first)"], key="mf_reason_dummy", disabled=True)
-        d = st.columns(4)
+        st.text_input("Client", key="mf_client")
+        rows = ss["mf_rows"]
+        for n in range(rows):
+            with st.container(border=True):
+                if rows > 1:
+                    st.caption(f"Fund {n + 1}")
+                a, b = st.columns([3, 1])
+                a.text_input("Fund name", key=f"mf_fund_{n}", placeholder="e.g. HDFC Flexi Cap Fund")
+                b.number_input("Amount (₹)", min_value=0.0, step=500.0, format="%g", key=f"mf_amount_{n}")
+                c1, c2 = st.columns(2)
+                c1.selectbox("Reason category", ["(select)"] + list(MF_REASONS), key=f"mf_cat_{n}")
+                cat = ss.get(f"mf_cat_{n}", "(select)")
+                if cat == MF_OTHERS:
+                    c2.text_input("Issue (type here)", key=f"mf_other_{n}", placeholder="Type the issue")
+                elif cat != "(select)":
+                    reasons = MF_REASONS[cat]
+                    names = [r for r, _ in reasons]
+                    if ss.get(f"mf_reason_{n}") not in names:
+                        ss[f"mf_reason_{n}"] = "(select)"
+                    c2.selectbox("Specific reason", ["(select)"] + names, key=f"mf_reason_{n}")
+                    exp = dict(reasons).get(ss[f"mf_reason_{n}"])
+                    if exp:
+                        c2.caption(exp)
+                else:
+                    c2.selectbox("Specific reason", ["(select category first)"], key=f"mf_rd_{n}", disabled=True)
+        m1, m2, _ = st.columns([1.3, 1.5, 4])
+        m1.button("➕ Add another fund", key="mf_more", on_click=on_mf_more)
+        if rows > 1:
+            m2.button("➖ Remove last fund", key="mf_less", on_click=on_mf_less)
+        d = st.columns(3)
         d[0].selectbox("Status", CFG["mf"]["statuses"], format_func=LAB.get, key="mf_status")
-        d[1].number_input("Amount (₹)", min_value=0.0, step=500.0, format="%g", key="mf_amount")
-        d[2].date_input("Added date", key="mf_added")
-        d[3].date_input("Due date (optional)", key="mf_due")
+        d[1].date_input("Added date", key="mf_added")
+        d[2].date_input("Due date (optional)", key="mf_due")
         st.button("Add", type="primary", key="mf_add_btn", on_click=on_mf_add)
         if ss.get("mf_err"):
             st.error(ss["mf_err"])
