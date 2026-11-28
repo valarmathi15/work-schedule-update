@@ -101,7 +101,15 @@ class PGConn:
         cur.close()
 
     def _connect(self):
-        import psycopg2
+        try:
+            import psycopg2
+        except ImportError:  # requirements.txt missing/misnamed on the host: install it ourselves
+            import importlib
+            import subprocess
+            import sys
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary"])
+            importlib.invalidate_caches()
+            import psycopg2
         import psycopg2.extras
         self.c = psycopg2.connect(self.url, connect_timeout=15, cursor_factory=psycopg2.extras.RealDictCursor)
         self.c.autocommit = True
@@ -786,7 +794,11 @@ with st.sidebar:
         rows = q("SELECT owner,tab,grp,title,kind,status,added,due,done_at FROM items")
         st.download_button("Download all as CSV", pd.DataFrame([dict(r) for r in rows]).to_csv(index=False),
                            file_name="work_tracker.csv", mime="text/csv")
-    st.caption(f"Data file: {DB_PATH}")
+    if DB_URL:
+        st.success("✅ Permanent database connected. Data will not be lost.")
+    else:
+        st.warning("⚠️ Temporary storage only. Data is lost when the app restarts or redeploys. "
+                   "Add DATABASE_URL in Streamlit Secrets to keep data permanently.")
 
 if not employees:
     st.title("Work Tracker")
